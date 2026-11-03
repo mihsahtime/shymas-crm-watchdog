@@ -1,4 +1,4 @@
-# TEMPORARY: runs the watchdog on the work branch before merge (live test 3: still broken, must not repeat). Deleted before merge.
+# TEMPORARY: runs the watchdog on the work branch before merge (live test 4: recovery). Deleted before merge.
 name: Pre-merge test
 
 on:
@@ -30,6 +30,6 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TEST_BREAK: database
+          TEST_BREAK: none
           DRY_RUN: 'false'
         run: ./watchdog.sh
