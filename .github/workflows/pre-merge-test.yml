@@ -1,4 +1,4 @@
-# TEMPORARY: runs the watchdog on the work branch before merge (live test 2: forced failure). Deleted before merge.
+# TEMPORARY: runs the watchdog on the work branch before merge (live test 3: still broken, must not repeat). Deleted before merge.
 name: Pre-merge test
 
 on:
