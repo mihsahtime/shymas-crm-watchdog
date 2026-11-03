@@ -1,0 +1,52 @@
+name: Watchdog
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'   # every 5 minutes (minute 2, 7, 12 ...)
+    - cron: '30 3 * * 1'       # Monday 03:30 UTC = 09:00 IST: weekly "alive" message
+  workflow_dispatch:
+    inputs:
+      test_break:
+        description: 'Test only: point one check at a deliberately wrong address'
+        type: choice
+        options: [none, website, database, login]
+        default: none
+      dry_run:
+        description: 'Check only: send no message, change no outage record'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write    # the outage record (one open issue while down)
+  actions: write   # weekly keep-alive of this schedule
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check website, database and login
+        env:
+          # Public values only (the same ones every visitor's browser receives).
+          SITE_URL: https://crm.shymas.com/
+          API_URL: https://tngsqrlsaarbbhgwcovx.supabase.co
+          API_KEY: sb_publishable_jhSlWidXumjk0cKG7ksb8Q_BGOwgjXV
+          # Secrets: masked in every log line by GitHub and by the script.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          HEARTBEAT_CRON: '30 3 * * 1'
+          TEST_BREAK: ${{ inputs.test_break }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: ./watchdog.sh
