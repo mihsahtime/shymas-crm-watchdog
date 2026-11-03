@@ -169,7 +169,15 @@ tg_reason() {
 send_telegram() {
   if tg sendMessage --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
        --data-urlencode "text=$1" --data-urlencode "disable_web_page_preview=true"; then
-    say "Telegram: message sent."
+    # Telegram echoes the delivered message. Compare it with what was sent and
+    # print only the result of the comparison and the message number - never
+    # the reply itself (it also names the chat).
+    local id same=no
+    id="$(jq -r '.result.message_id // "?"' "$WORK/tg" 2>/dev/null)"
+    [ "$(jq -r '.result.text // ""' "$WORK/tg" 2>/dev/null)" = "$1" ] && same=yes
+    say "Telegram: message sent. Delivery confirmed by Telegram (message #${id}); delivered text matches what was sent: ${same}."
+    say "Sent:"
+    printf '%s\n' "$1" | sed 's/^/  | /'
     return 0
   fi
   fail_loudly "Telegram: FAILED ($(tg_reason)). The message was NOT delivered."
