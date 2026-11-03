@@ -1,4 +1,4 @@
-# TEMPORARY: runs the watchdog on the work branch before merge. Deleted before merge.
+# TEMPORARY: runs the watchdog on the work branch before merge (live test 1: pass case). Deleted before merge.
 name: Pre-merge test
 
 on:
@@ -31,5 +31,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TEST_BREAK: none
-          DRY_RUN: 'true'
+          DRY_RUN: 'false'
         run: ./watchdog.sh
