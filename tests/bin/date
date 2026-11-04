@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+if [ -n "${FAKE_HHMM:-}" ] && [ "${!#}" = "+%H%M" ]; then echo "$FAKE_HHMM"; exit 0; fi
+exec /bin/date "$@"
