@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+import sys, os, json, re
+args = sys.argv[1:]
+F = os.environ['FAKE_DIR']
+out = None; data = []; usestdin = False; url = None
+i = 0
+while i < len(args):
+    a = args[i]
+    if a == '-o': out = args[i+1]; i += 2; continue
+    if a in ('-w', '--connect-timeout', '--max-time', '--max-redirs', '-X', '-H', '--data'): i += 2; continue
+    if a == '--data-urlencode': data.append(args[i+1]); i += 2; continue
+    if a == '-K': usestdin = True; i += 2; continue
+    if a.startswith('-'): i += 1; continue
+    url = a; i += 1
+def st(name):
+    p = os.path.join(F, name)
+    return open(p).read().strip() if os.path.exists(p) else 'ok'
+def reply(code, body=''):
+    if out: open(out, 'w').write(body)
+    sys.stdout.write(str(code)); sys.exit(0)
+if usestdin:
+    cfg = sys.stdin.read()
+    m = re.search(r'/bot[^/]*/(\w+)"', cfg); method = m.group(1)
+    if method == 'sendMessage':
+        text = [d[5:] for d in data if d.startswith('text=')][0]
+        n = int(st('msgcount') if os.path.exists(os.path.join(F,'msgcount')) else '0') + 1
+        open(os.path.join(F,'msgcount'),'w').write(str(n))
+        with open(os.path.join(F,'sent'),'a') as f: f.write('=====MSG\n' + text + '\n')
+        reply(200, json.dumps({'ok': True, 'result': {'message_id': n, 'text': text}}))
+    reply(200, json.dumps({'ok': True, 'result': {}}))
+if url.startswith('https://127.0.0.1:9'):
+    if out: open(out,'w').write('')
+    sys.stdout.write('000'); sys.exit(7)
+kind = 'site' if 'crm.example' in url else ('db' if 'health_ping' in url else ('login' if '/auth/v1/health' in url else 'other'))
+s = st(kind)
+if s == 'ok':
+    reply(200, '"ok 2026-11-04 09:00:00 IST"' if kind == 'db' else '{}')
+if s == '522': reply(522, 'x')
+if out: open(out,'w').write('')
+sys.stdout.write('000'); sys.exit(28)
