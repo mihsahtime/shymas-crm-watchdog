@@ -2,7 +2,7 @@ name: Watchdog
 
 on:
   schedule:
-    - cron: '2-59/5 * * * *'   # every 5 minutes (minute 2, 7, 12 ...)
+    - cron: '*/5 * * * *'      # every 5 minutes
     - cron: '30 3 * * 1'       # Monday 03:30 UTC = 09:00 IST: weekly "alive" message
   workflow_dispatch:
     inputs:
