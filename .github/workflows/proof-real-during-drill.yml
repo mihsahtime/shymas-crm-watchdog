@@ -1,0 +1,37 @@
+name: Proof - a real failure during an open drill still alerts unmarked
+# TEMPORARY (04/11/2026): one run, on its own branch only; the branch is deleted afterwards.
+on:
+  push:
+    branches: [claude/proof-real-during-drill]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SITE_URL: https://crm.shymas.com/
+      API_KEY: sb_publishable_jhSlWidXumjk0cKG7ksb8Q_BGOwgjXV
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: 1 - a drill (database broken on purpose) - expect one 🔴 marked TEST, and a TEST record
+        env:
+          API_URL: https://tngsqrlsaarbbhgwcovx.supabase.co
+          TEST_BREAK: database
+        run: ./watchdog.sh
+      - name: 2 - a normal run meets a real failure while the drill's record is open - expect one 🔴 NOT marked
+        env:
+          # the database and login addresses fail for real here (nothing is broken "for a test")
+          API_URL: https://127.0.0.1:9
+          TEST_BREAK: none
+        run: ./watchdog.sh
