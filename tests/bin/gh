@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+import sys, os, json, subprocess
+F = os.environ['FAKE_DIR']; P = os.path.join(F, 'issues.json')
+issues = json.load(open(P)) if os.path.exists(P) else []
+a = sys.argv[1:]; assert a[0] == 'api'
+path = None; method = 'GET'; fields = {}; jq = None; i = 1
+while i < len(a):
+    if a[i] == '-X': method = a[i+1]; i += 2
+    elif a[i] == '-f': k, v = a[i+1].split('=', 1); fields[k] = v; i += 2
+    elif a[i] == '--jq': jq = a[i+1]; i += 2
+    elif path is None: path = a[i]; i += 1
+    else: i += 1
+def save(): json.dump(issues, open(P, 'w'))
+def emit(obj):
+    s = json.dumps(obj)
+    if jq: s = subprocess.run(['jq', '-r', jq], input=s, capture_output=True, text=True).stdout
+    sys.stdout.write(s)
+if path.startswith('repos/') and '/issues?' in path and method == 'GET':
+    emit([x for x in issues if x['state'] == 'open']); sys.exit(0)
+if path.endswith('/issues') and fields:
+    n = max([x['number'] for x in issues] + [0]) + 1
+    issues.append({'number': n, 'title': fields['title'], 'body': fields['body'], 'state': 'open', 'user': {'login': 'github-actions[bot]'}, 'pull_request': None, 'comments': []})
+    save(); emit({'number': n}); sys.exit(0)
+if path.endswith('/comments'):
+    n = int(path.split('/')[-2]); [x['comments'].append(fields['body']) for x in issues if x['number'] == n]; save(); sys.exit(0)
+if method == 'PATCH':
+    n = int(path.split('/')[-1]); [x.update(state=fields['state']) for x in issues if x['number'] == n]; save(); sys.exit(0)
+if method == 'PUT': sys.exit(0)
+sys.exit(1)

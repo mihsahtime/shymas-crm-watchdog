@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       test_break:
-        description: 'Test only: point one check at a deliberately wrong address'
+        description: 'Test only (a drill): point one check at a deliberately wrong address. Its alerts start "🧪 TEST — not a real outage". Refused 21:30–07:00 IST.'
         type: choice
         options: [none, website, database, login]
         default: none

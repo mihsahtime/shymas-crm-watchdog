@@ -14,6 +14,12 @@
 #   an open "DOWN" issue  = an outage alert was already sent
 # So there is one alert per outage and one recovery message, never a repeat.
 #
+# Test runs ("drills", TEST_BREAK): everything a drill causes starts with
+# "TEST — not a real outage", the outage record included, so the recovery
+# message the next normal run sends is marked too. A real failure is never
+# hidden behind a drill: it alerts unmarked, even while a test record is open.
+# No test alerts at night (drills only 07:00-21:30 IST; quiet 22:00-07:00).
+#
 # Log rule: print only OK / FAILED, the technical reason, and times.
 # Never print a response body, a URL with a secret in it, or a secret.
 
@@ -38,6 +44,8 @@ TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
 # A deliberately wrong address, used only when a test asks for one.
 BROKEN_URL="https://127.0.0.1:9/"
+# The first line of every message a test causes.
+TEST_LINE="🧪 TEST — not a real outage"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -194,6 +202,28 @@ find_open_incident() {
     || fail_loudly "GitHub: FAILED (could not read the outage record)"
   INCIDENT_NO="$(printf '%s' "$out" | head -n1 | awk '{print $1}')"
   INCIDENT_SINCE="$(printf '%s' "$out" | grep -o 'since=[0-9]*' | head -n1 | cut -d= -f2)"
+  # A record opened by a test run carries "test=1".
+  INCIDENT_TEST=false
+  printf '%s' "$out" | grep -q 'test=1' && INCIDENT_TEST=true
+}
+
+open_down_record() { # true = a test record
+  local title body
+  title="DOWN since $(ist_time "$FIRST_TRY_AT") IST"
+  body="Down confirmed: $(ist_time "$NOW") IST
+Website: $(shown website "$R_WEBSITE")
+Database: $(shown database "$R_DATABASE")
+Login: $(shown login "$R_LOGIN")
+Checked twice, ${RETRY_WAIT} seconds apart.
+
+<!-- since=${FIRST_TRY_AT} -->"
+  if [ "$1" = true ]; then
+    title="${title} (TEST)"
+    body="TEST — not a real outage.
+${body}
+<!-- test=1 -->"
+  fi
+  open_incident "$title" "$body"
 }
 
 open_incident() { # title body
@@ -223,6 +253,39 @@ duration_text() { # seconds
   else say "about ${h} ${hs} ${m} minutes"; fi
 }
 
+# Hours and minutes in IST as a number, e.g. 654 for 06:54, 2130 for 21:30.
+ist_hhmm() { local hm; hm="$(TZ=Asia/Kolkata date '+%H%M')"; say "$(( 10#$hm ))"; }
+# A drill may start only from 07:00 to 21:30 IST (its recovery lands before 22:00).
+drill_hours() { local hm; hm="$(ist_hhmm)"; [ "$hm" -ge 700 ] && [ "$hm" -lt 2130 ]; }
+# No test message at all from 22:00 to 07:00 IST.
+quiet_hours() { local hm; hm="$(ist_hhmm)"; [ "$hm" -ge 2200 ] || [ "$hm" -lt 700 ]; }
+
+# failed_twice <check> <first result> <second result>
+failed_twice() {
+  if [ "$2" != OK ] && [ "$3" != OK ]; then
+    if [ "$TEST_BREAK" = "$1" ]; then DOWN_DRILL=true; else DOWN_REAL=true; fi
+  fi
+}
+
+# A check's result as a message shows it: the check a drill broke says so.
+shown() { # <check> <result>
+  if [ "$TEST_BREAK" = "$1" ] && [ "$2" != OK ]; then say "$2 — broken on purpose for a test"
+  else say "$2"; fi
+}
+
+alert_down() { # true = a test (first line "TEST — not a real outage"), false = real
+  local msg
+  msg="🔴 CRM DOWN
+Time: $(ist_time "$NOW")
+Website: $(shown website "$R_WEBSITE")
+Database: $(shown database "$R_DATABASE")
+Login: $(shown login "$R_LOGIN")
+Checked twice, ${RETRY_WAIT} seconds apart."
+  [ "$1" = true ] && msg="${TEST_LINE}
+${msg}"
+  send_telegram "$msg"
+}
+
 # ---------------------------------------------------------------- main
 
 if [ "${GITHUB_ACTIONS:-}" = true ]; then
@@ -234,9 +297,20 @@ fi
 [ -n "$TELEGRAM_CHAT_ID" ]   || fail_loudly "Secret TELEGRAM_CHAT_ID: MISSING"
 say "Secrets TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID: present (values hidden)."
 
+# A test run (a "drill") breaks one check on purpose. Everything it causes is
+# marked "TEST - not a real outage": the alert, the outage record, and the
+# recovery message that the next normal run sends. No test alerts at night:
+# a drill asked for between 21:30 and 07:00 IST runs as a normal check (so the
+# watch never stops), and a test record still open at night closes quietly.
 case "$TEST_BREAK" in
   none) ;;
-  website|database|login) say "TEST RUN: the ${TEST_BREAK} check is pointed at a deliberately wrong address." ;;
+  website|database|login)
+    if ! drill_hours; then
+      say "TEST RUN refused: no test alerts between 21:30 and 07:00 IST. Running as a normal check instead."
+      TEST_BREAK=none
+    else
+      say "TEST RUN: the ${TEST_BREAK} check is pointed at a deliberately wrong address. Any alert it causes is marked TEST."
+    fi ;;
   *) fail_loudly "Unknown test setting." ;;
 esac
 
@@ -258,39 +332,44 @@ fi
 
 FIRST_TRY_AT="$(date +%s)"
 run_checks 1
-DOWN=false
+# DOWN_REAL: a check that was NOT deliberately broken failed both times.
+# DOWN_DRILL: only the check a drill broke on purpose failed both times.
+DOWN_REAL=false
+DOWN_DRILL=false
 if any_failed; then
   W1="$R_WEBSITE"; D1="$R_DATABASE"; L1="$R_LOGIN"
   say "A check failed. Waiting ${RETRY_WAIT} seconds, then checking again."
   sleep "$RETRY_WAIT"
   run_checks 2
-  { [ "$W1" != OK ] && [ "$R_WEBSITE" != OK ]; } && DOWN=true
-  { [ "$D1" != OK ] && [ "$R_DATABASE" != OK ]; } && DOWN=true
-  { [ "$L1" != OK ] && [ "$R_LOGIN" != OK ]; } && DOWN=true
+  failed_twice website "$W1" "$R_WEBSITE"
+  failed_twice database "$D1" "$R_DATABASE"
+  failed_twice login "$L1" "$R_LOGIN"
 fi
 
 NOW="$(date +%s)"
 
-if [ "$DOWN" = true ]; then
+if [ "$DOWN_REAL" = true ] || [ "$DOWN_DRILL" = true ]; then
   if [ -n "$INCIDENT_NO" ]; then
+    if [ "$INCIDENT_TEST" = true ] && [ "$DOWN_REAL" = true ]; then
+      # A real failure while a drill's record is open: never stay silent.
+      say "Result: a REAL failure while test outage record #${INCIDENT_NO} is open. Alerting for real."
+      alert_down false
+      close_incident "$INCIDENT_NO" "Test ended at $(ist_time "$NOW") IST: a real failure was found and a real alert was sent."
+      open_down_record false
+      exit 0
+    fi
     say "Result: still DOWN. Alert was already sent; no repeat."
     exit 0
   fi
-  say "Result: DOWN confirmed (failed twice, ${RETRY_WAIT} seconds apart)."
-  MSG="🔴 CRM DOWN
-Time: $(ist_time "$NOW")
-Website: ${R_WEBSITE}
-Database: ${R_DATABASE}
-Login: ${R_LOGIN}
-Checked twice, ${RETRY_WAIT} seconds apart."
-  send_telegram "$MSG"
-  open_incident "DOWN since $(ist_time "$FIRST_TRY_AT") IST" "Down confirmed: $(ist_time "$NOW") IST
-Website: ${R_WEBSITE}
-Database: ${R_DATABASE}
-Login: ${R_LOGIN}
-Checked twice, ${RETRY_WAIT} seconds apart.
-
-<!-- since=${FIRST_TRY_AT} -->"
+  if [ "$DOWN_REAL" = true ]; then
+    say "Result: DOWN confirmed (failed twice, ${RETRY_WAIT} seconds apart)."
+    alert_down false
+    open_down_record false
+  else
+    say "Result: TEST outage confirmed (the deliberately broken check failed twice)."
+    alert_down true
+    open_down_record true
+  fi
   exit 0
 fi
 
@@ -308,12 +387,19 @@ fi
 if [ -n "$INCIDENT_NO" ]; then
   SINCE="${INCIDENT_SINCE:-$NOW}"
   DUR="$(duration_text $(( NOW - SINCE )))"
-  MSG="🟢 CRM BACK UP
+  if [ "$INCIDENT_TEST" = true ] && quiet_hours; then
+    say "Test outage record #${INCIDENT_NO}: all three checks passing. No test message at night; closing the record quietly."
+    close_incident "$INCIDENT_NO" "Test ended: $(ist_time "$NOW") IST. All three checks passing. No message sent (night)."
+  else
+    MSG="🟢 CRM BACK UP
 Time: $(ist_time "$NOW")
 Down for ${DUR}.
 All three checks passing."
-  send_telegram "$MSG"
-  close_incident "$INCIDENT_NO" "Back up: $(ist_time "$NOW") IST. Down for ${DUR}. All three checks passing."
+    [ "$INCIDENT_TEST" = true ] && MSG="${TEST_LINE}
+${MSG}"
+    send_telegram "$MSG"
+    close_incident "$INCIDENT_NO" "Back up: $(ist_time "$NOW") IST. Down for ${DUR}. All three checks passing."
+  fi
 fi
 
 if [ "$EVENT_SCHEDULE" = "$HEARTBEAT_CRON" ]; then
